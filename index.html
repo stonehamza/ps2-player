@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>PS2 Mate — PlayStation 2 Emulator</title>
+  <meta name="theme-color" content="#0b0b1a">
+  <meta name="description" content="PlayStation 2 emulator in your browser (Play! WebAssembly). Installable PWA, works offline.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="index.css">
+  <script src="diag.js"></script>
+</head>
+<body>
+  <header id="toolbar">
+    <div class="toolbar-left">
+      <span class="logo">PS2 MATE</span>
+      <span class="game-title" id="gameTitle">No disc loaded</span>
+    </div>
+    <div class="toolbar-center">
+      <button id="btnLoad" title="Load Disc (Ctrl+O)" class="primary-btn load-btn"><span class="icon">💿</span> Load Disc</button>
+      <a href="fast.html" id="btnFast" class="primary-btn load-btn" style="text-decoration:none" title="Fast mode (recompiled games)"><span class="icon">⚡</span> Fast</a>
+      <input type="file" id="fileInput" accept=".iso,.cso,.chd,.isz,.bin,.elf,.cue" hidden>
+      <div class="divider"></div>
+      <button id="btnPause" title="Pause (P)" disabled><span class="icon">⏸</span> Pause</button>
+      <button id="btnReset" title="Reset (Ctrl+R)" disabled><span class="icon">🔄</span> Reset</button>
+      <div class="divider"></div>
+      <button id="btnSaveStateHeader" title="Save State (F1)" disabled><span class="icon">💾</span> Save</button>
+      <button id="btnLoadStateHeader" title="Load State (F3)" disabled><span class="icon">📂</span> Load</button>
+    </div>
+    <div class="toolbar-right">
+      <div class="volume-control">
+        <span>🔊</span>
+        <input type="range" id="volumeSlider" min="0" max="100" value="100">
+        <button id="btnMute" disabled>🔇</button>
+      </div>
+      <div class="divider"></div>
+      <button id="btnFullscreen" title="Fullscreen (F11)">⛶</button>
+      <button id="btnSettings" title="Settings">⚙️</button>
+      <button id="btnToggleStats" title="Performance Stats HUD"><span class="icon">📊</span> Stats</button>
+    </div>
+  </header>
+
+  <main id="content">
+    <div id="emulatorContainer">
+      <div id="noGameBanner">
+        <div class="banner-content">
+          <div class="ps2-symbols">
+            <span class="ps-sym sym-square">🔲</span>
+            <span class="ps-sym sym-triangle">🔺</span>
+            <span class="ps-sym sym-circle">⭕</span>
+            <span class="ps-sym sym-cross">✖️</span>
+          </div>
+          <div class="banner-badge">NEXT-GEN WEB EMULATION</div>
+          <h1>PS2 MATE</h1>
+          <p class="banner-subtitle">PlayStation 2 Browser Emulator — Powered by Play! WebAssembly</p>
+          <div class="banner-actions">
+            <button id="btnLoadBanner" class="primary-btn launch-btn"><span class="btn-icon">💿</span> Select PS2 Disc Image</button>
+            <div class="format-pills">
+              <span class="pill">.ISO</span>
+              <span class="pill">.CSO</span>
+              <span class="pill">.CHD</span>
+              <span class="pill">.ISZ</span>
+              <span class="pill">.BIN</span>
+              <span class="pill">.ELF</span>
+            </div>
+            <p class="hint">🔒 100% Local Execution • No BIOS Required • Plug & Play</p>
+          </div>
+          <div id="recentGames"></div>
+        </div>
+      </div>
+      <canvas id="outputCanvas" width="640" height="480" tabindex="-1"></canvas>
+
+      <!-- Performance Stats OSD HUD -->
+      <div id="statsHud" class="stats-hud" style="display:none;">
+        <div class="hud-header">⚡ PS2 Performance Monitor</div>
+        <div class="hud-grid">
+          <div class="hud-stat"><span class="hud-label">FPS / Latency</span><span id="hudFps" class="hud-val">0 FPS (0.0 ms)</span></div>
+          <div class="hud-stat"><span class="hud-label">Disc Cache Hit Rate</span><span id="hudCacheRate" class="hud-val">100%</span></div>
+          <div class="hud-stat"><span class="hud-label">Disc Reads</span><span id="hudDiscReads" class="hud-val">0 sync / 0 async</span></div>
+          <div class="hud-stat"><span class="hud-label">WASM JIT Engine</span><span id="hudJitBlocks" class="hud-val">0 blocks (O(1) Array)</span></div>
+          <div class="hud-stat"><span class="hud-label">WASM Memory</span><span id="hudMemory" class="hud-val">-- MB</span></div>
+          <div class="hud-stat"><span class="hud-label">CPU Multithreading</span><span id="hudCores" class="hud-val">-- Cores</span></div>
+          <div class="hud-stat"><span class="hud-label">GPU Renderer</span><span id="hudGpu" class="hud-val">WebGL2 High-Perf</span></div>
+        </div>
+      </div>
+
+      <div id="statusOverlay" class="overlay" style="display:none;"><div class="overlay-content"><div class="spinner"></div><p id="statusText">Preparing your game…</p></div></div>
+      <div id="pauseOverlay" class="overlay" style="display:none;"><div class="overlay-content"><p>Game Paused</p><small>Press P to resume</small></div></div>
+    </div>
+
+    <aside id="settingsPanel" class="side-panel" style="display:none;">
+      <div class="panel-header"><h2>Emulator Settings</h2><button id="btnCloseSettings">✕</button></div>
+      <div class="panel-body">
+        <section class="settings-section"><h3>Controls & Controller Assignment</h3>
+          <div class="setting-row"><label>Gamepad Status</label><div id="gamepadStatus">No gamepad detected</div></div>
+          <div class="setting-row">
+            <label for="selPlayer1Input">Player 1 Input</label>
+            <select id="selPlayer1Input">
+              <option value="auto">Keyboard + Auto Gamepad</option>
+              <option value="keyboard">Keyboard Only</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="selPlayer2Input">Player 2 Input</label>
+            <select id="selPlayer2Input">
+              <option value="none">Disabled / None</option>
+            </select>
+          </div>
+          <div class="setting-row vertical" style="margin-top: 12px;">
+            <button id="btnOpenControlsModal" class="panel-btn primary">
+              🎮 Customize Control Mappings
+            </button>
+          </div>
+        </section>
+
+        <section class="settings-section"><h3>Performance & Graphics</h3>
+          <div class="setting-row">
+            <label for="chkShowStats">Performance Stats HUD</label>
+            <input type="checkbox" id="chkShowStats">
+          </div>
+          <div class="setting-row"><button id="btnPerfPreset" class="primary-btn" style="flex:1">⚡ Max Performance Preset / أقصى سرعة</button></div>
+          <div class="setting-row">
+            <label for="chkFastMode">Fast Mode (No GPU Stalls)</label>
+            <input type="checkbox" id="chkFastMode" checked>
+          </div>
+          <div class="setting-row">
+            <label for="chkUnlockFps">Fast Forward (Unlock FPS)</label>
+            <input type="checkbox" id="chkUnlockFps">
+          </div>
+          <div class="setting-row">
+            <label for="selResolution">Resolution Scale</label>
+            <select id="selResolution">
+              <option value="0.5">0.5x Ultra Speed (320x240)</option>
+              <option value="0.75">0.75x Fast (480x360)</option>
+              <option value="1" selected>1x Native PS2 (640x480)</option>
+              <option value="2">2x HD Upscale (1280x960)</option>
+              <option value="3">3x 3K HD (1920x1440)</option>
+              <option value="4">4x 4K Ultra HD (2560x1920)</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="chkWidescreen">Widescreen 16:9</label>
+            <input type="checkbox" id="chkWidescreen">
+          </div>
+        </section>
+
+        <section class="settings-section"><h3>Save & Load States</h3>
+          <div class="setting-row" style="gap: 8px;">
+            <button id="btnSaveState" class="primary-btn" style="flex:1;">💾 Save State (F1)</button>
+            <button id="btnLoadState" class="primary-btn" style="flex:1; background: linear-gradient(135deg, var(--ps-blue), #004fb0);">📂 Load State (F3)</button>
+          </div>
+        </section>
+
+        <section class="settings-section"><h3>About</h3>
+          <p class="about-text">PS2 Mate v1.0.0<br>Powered by <a href="https://purei.org" target="_blank">Play!</a> (PlayStation 2 emulator)<br>See purei.org for license details.<br><br>Web / PWA edition — runs fully offline after first load.</p>
+        </section>
+      </div>
+    </aside>
+
+    <!-- Interactive Control Mapping Modal -->
+    <div id="controlMappingModal" class="modal-overlay" style="display:none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>🎮 Control Mappings</h2>
+          <button id="btnCloseControlsModal" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Player Toggle -->
+          <div class="tab-group">
+            <button id="tabP1" class="tab-btn active">Player 1</button>
+            <button id="tabP2" class="tab-btn">Player 2</button>
+          </div>
+
+          <!-- Device Selector Toggle -->
+          <div class="tab-group device-group">
+            <button id="deviceKB" class="tab-btn active">⌨️ Keyboard</button>
+            <button id="deviceGP" class="tab-btn">🎮 Gamepad</button>
+          </div>
+
+          <p id="mappingInstructions" class="mapping-hint">Click any action button below to rebind.</p>
+
+          <!-- Dynamic Action Binding Grid -->
+          <div class="mapping-grid">
+            <div class="bind-card">
+              <span class="bind-label">D-Pad Up</span>
+              <button class="bind-btn" data-action="DPAD_UP">Up Arrow</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">D-Pad Down</span>
+              <button class="bind-btn" data-action="DPAD_DOWN">Down Arrow</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">D-Pad Left</span>
+              <button class="bind-btn" data-action="DPAD_LEFT">Left Arrow</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">D-Pad Right</span>
+              <button class="bind-btn" data-action="DPAD_RIGHT">Right Arrow</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">Cross (✕)</span>
+              <button class="bind-btn" data-action="BTN_CROSS">Z</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">Circle (○)</span>
+              <button class="bind-btn" data-action="BTN_CIRCLE">X</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">Square (□)</span>
+              <button class="bind-btn" data-action="BTN_SQUARE">A</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">Triangle (△)</span>
+              <button class="bind-btn" data-action="BTN_TRIANGLE">S</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">L1 Shoulder</span>
+              <button class="bind-btn" data-action="BTN_L1">1</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">R1 Shoulder</span>
+              <button class="bind-btn" data-action="BTN_R1">8</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">L2 Trigger</span>
+              <button class="bind-btn" data-action="BTN_L2">2</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">R2 Trigger</span>
+              <button class="bind-btn" data-action="BTN_R2">9</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">Select</span>
+              <button class="bind-btn" data-action="BTN_SELECT">Backspace</button>
+            </div>
+            <div class="bind-card">
+              <span class="bind-label">Start</span>
+              <button class="bind-btn" data-action="BTN_START">Enter</button>
+            </div>
+          </div>
+
+          <!-- Realtime Input Tester -->
+          <div class="input-tester-card">
+            <div class="tester-header">
+              <span>Live Input Test Monitor</span>
+              <span id="testerGamepadLabel" class="tester-sub">Testing Keyboard bindings...</span>
+            </div>
+            <div class="tester-badges">
+              <div class="test-badge" data-test="BTN_CROSS">✕ CROSS</div>
+              <div class="test-badge" data-test="BTN_CIRCLE">○ CIRCLE</div>
+              <div class="test-badge" data-test="BTN_SQUARE">□ SQUARE</div>
+              <div class="test-badge" data-test="BTN_TRIANGLE">△ TRIANGLE</div>
+              <div class="test-badge" data-test="BTN_L1">L1</div>
+              <div class="test-badge" data-test="BTN_R1">R1</div>
+              <div class="test-badge" data-test="BTN_L2">L2</div>
+              <div class="test-badge" data-test="BTN_R2">R2</div>
+              <div class="test-badge" data-test="BTN_SELECT">SELECT</div>
+              <div class="test-badge" data-test="BTN_START">START</div>
+              <div class="test-badge" data-test="DPAD_UP">D-UP</div>
+              <div class="test-badge" data-test="DPAD_DOWN">D-DN</div>
+              <div class="test-badge" data-test="DPAD_LEFT">D-LFT</div>
+              <div class="test-badge" data-test="DPAD_RIGHT">D-RGT</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btnPresetKB" class="modal-btn secondary">Reset Keyboard Defaults</button>
+          <button id="btnPresetGP" class="modal-btn secondary">Reset Gamepad Defaults</button>
+          <button id="btnSaveControlMapping" class="modal-btn primary">Save & Close</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer id="statusBar"><span id="fpsCounter">•</span><span id="statusMessage">Ready</span><span id="timeCounter">00:00</span></footer>
+  <script src="pwa.js"></script>
+  <script src="touch.js" defer></script>
+  <script type="module" src="index.js"></script>
+</body>
+</html>
